@@ -99,7 +99,7 @@ def push_tiktok_post(post: dict, post_index: int, mode: str = "addToQueue") -> d
 
     if is_video:
         assets = [{"video": {"url": post["video_url"]}}]
-        scheduling_type = "automatic"
+        scheduling_type = "notification"
         tiktok_meta = {"isAiGenerated": False}
     else:
         assets = [{"image": {"url": url}} for url in post["slides"]]
@@ -183,7 +183,7 @@ def run_autopilot():
             print(f"Reached --max={max_posts} cap.")
             break
 
-        kind = "VIDEO (AUTO)" if post.get("video_url") else "CAROUSEL (NOTIFY)"
+        kind = "VIDEO (NOTIFY)" if post.get("video_url") else "CAROUSEL (NOTIFY)"
         print(f"-> [{idx+1}/{len(unposted)}] [{kind}] {post['id']} | Score: {post.get('viral_score', '?')}")
         print(f"   Title: {post.get('tiktok_title', '')}")
 
