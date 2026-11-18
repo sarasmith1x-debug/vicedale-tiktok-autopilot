@@ -4,22 +4,22 @@ import sys
 import time
 import urllib.error
 import urllib.request
-import datetime
 
 BUFFER_API_URL = "https://api.buffer.com"
 TOKEN = os.environ.get("BUFFER_ACCESS_TOKEN", "").strip()
 CHANNEL_ID = os.environ.get("BUFFER_TIKTOK_CHANNEL_ID", "6afd1afeece6dfde5f040b25").strip()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-VAULT_PATH = os.path.join(SCRIPT_DIR, "VICEDALE_VAULT.json")
+VIDEOS_VAULT_PATH = os.path.join(SCRIPT_DIR, "VIDEOS_VAULT.json")
+CAROUSELS_VAULT_PATH = os.path.join(SCRIPT_DIR, "VICEDALE_VAULT.json")
 HISTORY_PATH = os.path.join(SCRIPT_DIR, "posted_history.json")
 
 # ─────────────────────────────────────────────────────────────────
-# ANTI-SHADOWBAN SYSTEM v2.0
-# TikTok SEO + Engagement bait + caption variation to avoid spam filter
+# ANTI-SHADOWBAN HYBRID AUTOPILOT v3.0
+# - Pro MP4 Videos (with built-in VO + Music + SFX) -> automatic publish
+# - Photo Carousels (need TikTok trending sound)    -> notification (Notify Me)
 # ─────────────────────────────────────────────────────────────────
 
-# Top GTA6 TikTok SEO keywords (high search volume, trending Nov 2026)
 GTA6_SEO_TAGS = [
     "#gta6", "#gtavi", "#gta6tips", "#gta6launch", "#gta6guide",
     "#vicecity", "#leonida", "#rockstargames", "#gta6gameplay",
@@ -27,7 +27,6 @@ GTA6_SEO_TAGS = [
     "#gaming", "#ps5", "#xbox"
 ]
 
-# Engagement boosters – rotate so each post feels unique to TikTok's spam detection
 ENGAGEMENT_HOOKS = [
     "💾 Save this before launch night.",
     "🔁 Share with your squad playing tonight.",
@@ -35,11 +34,10 @@ ENGAGEMENT_HOOKS = [
     "🌟 Follow for daily GTA 6 drops.",
     "💬 Which region are you exploring first?",
     "🔥 Follow @vicedale.gg — posting live on launch night.",
-    "✅ Save & follow for verified info only.",
-    "😮 Swipe — last slide is the most insane.",
+    "✅ Save & follow for verified Rockstar info only.",
+    "😮 Watch till the end — last stat is wild.",
 ]
 
-# Anti-shadowban timing: space out posts with varied delay (not robotic)
 POST_DELAY_SECONDS = 2.5
 
 
@@ -59,33 +57,23 @@ def save_json(path, data):
 
 
 def build_caption(post: dict, post_index: int) -> str:
-    """
-    Build an SEO-optimized, anti-shadowban caption.
-    Strategy:
-    - Each caption is unique (index-based variation)
-    - 5-6 high-value GTA6 hashtags (not tag-spam 20+ which triggers shadowban)
-    - Engagement hook varies per post
-    - Short punchy text before tags (TikTok FYP algorithm reads first 3 lines)
-    """
-    base_text_lines = post.get("text", "").split("\n\n")
+    raw = post.get("text", "").strip()
+    # Videos already have bespoke SEO captions with exactly 5 viral tags
+    if post.get("video_url") and raw:
+        return raw
+    base_text_lines = raw.split("\n\n")
     core_text = base_text_lines[0] if base_text_lines else post.get("tiktok_title", "")
-
-    # Pick engagement hook based on index (rotates)
     hook = ENGAGEMENT_HOOKS[post_index % len(ENGAGEMENT_HOOKS)]
-
-    # Pick 8 SEO tags (not 15+ = shadowban risk, not 3 = missing reach)
-    # Rotate the selection based on post_index so each post has slightly different tag mix
-    all_tags = GTA6_SEO_TAGS.copy()
-    offset = post_index % len(all_tags)
-    rotated = all_tags[offset:] + all_tags[:offset]
-    selected_tags = rotated[:8]
-    tags_str = " ".join(selected_tags)
-
-    caption = f"{core_text}\n\n{hook}\n\n{tags_str}"
-    return caption
+    # Always lead with #gta6 #gtavi + 3 rotating high-volume GTA6 SEO tags (EXACTLY 5 tags)
+    rotating_pool = [t for t in GTA6_SEO_TAGS if t not in ("#gta6", "#gtavi")]
+    offset = (post_index * 3) % len(rotating_pool)
+    rotated = rotating_pool[offset:] + rotating_pool[:offset]
+    selected_5 = ["#gta6", "#gtavi"] + rotated[:3]
+    tags_str = " ".join(selected_5)
+    return f"{core_text}\n\n{hook}\n\n{tags_str}"
 
 
-def push_tiktok_carousel(post: dict, post_index: int, mode: str = "addToQueue") -> dict:
+def push_tiktok_post(post: dict, post_index: int, mode: str = "addToQueue") -> dict:
     mutation = """
     mutation CreatePost($input: CreatePostInput!) {
       createPost(input: $input) {
@@ -106,23 +94,30 @@ def push_tiktok_carousel(post: dict, post_index: int, mode: str = "addToQueue") 
     }
     """
 
-    assets = [{"image": {"url": url}} for url in post["slides"]]
+    is_video = bool(post.get("video_url"))
     caption = build_caption(post, post_index)
+
+    if is_video:
+        assets = [{"video": {"url": post["video_url"]}}]
+        scheduling_type = "automatic"
+        tiktok_meta = {"isAiGenerated": False}
+    else:
+        assets = [{"image": {"url": url}} for url in post["slides"]]
+        scheduling_type = "notification"
+        tiktok_meta = {
+            "title": post["tiktok_title"][:90],
+            "isAiGenerated": False,
+        }
 
     variables = {
         "input": {
             "channelId": CHANNEL_ID,
             "text": caption,
             "mode": mode,
-            "schedulingType": "automatic",
+            "schedulingType": scheduling_type,
             "needsApproval": False,
             "assets": assets,
-            "metadata": {
-                "tiktok": {
-                    "title": post["tiktok_title"][:90],
-                    "isAiGenerated": False,
-                }
-            },
+            "metadata": {"tiktok": tiktok_meta},
         }
     }
 
@@ -136,7 +131,7 @@ def push_tiktok_carousel(post: dict, post_index: int, mode: str = "addToQueue") 
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="ignore")
@@ -149,32 +144,38 @@ def run_autopilot():
         sys.exit(1)
 
     max_posts = None
+    only_type = None
     for arg in sys.argv[1:]:
         if arg.startswith("--max="):
             max_posts = int(arg.split("=")[1])
+        elif arg.startswith("--only="):
+            only_type = arg.split("=")[1].strip().lower()
 
-    vault = load_json(VAULT_PATH, [])
+    videos_vault = load_json(VIDEOS_VAULT_PATH, [])
+    carousels_vault = load_json(CAROUSELS_VAULT_PATH, [])
     posted_history = load_json(HISTORY_PATH, [])
 
-    # Vault is now sorted by viral_score desc — no random shuffle needed
-    # This guarantees highest-viral posts queue FIRST always
-    vault_sorted = sorted(vault, key=lambda x: x.get("viral_score", 0), reverse=True)
+    videos_sorted = sorted(videos_vault, key=lambda x: x.get("viral_score", 0), reverse=True)
+    carousels_sorted = sorted(carousels_vault, key=lambda x: x.get("viral_score", 0), reverse=True)
 
-    print("=== [Vice-Dale GTA 6 TikTok Autopilot v2.0 — Anti-Shadowban Edition] ===")
+    if only_type == "videos":
+        combined = videos_sorted
+    elif only_type == "carousels":
+        combined = carousels_sorted
+    else:
+        # Prioritize Pro Videos (automatic with music+VO), then Notify Carousels
+        combined = videos_sorted + carousels_sorted
+
+    print("=== [Vice-Dale GTA 6 TikTok Autopilot v3.0 — Hybrid Pro Video + Notify Carousel] ===")
     print(f"Channel: {CHANNEL_ID} (@vicedale.gg)")
-    print(f"Vault: {len(vault_sorted)} carousels | Posted so far: {len(posted_history)}")
-    print(f"Mode: Viral-first ordering + Anti-shadowban SEO captions")
+    print(f"Videos: {len(videos_sorted)} (auto) | Carousels: {len(carousels_sorted)} (notify) | Posted: {len(posted_history)}")
     print()
 
-    if not vault_sorted:
-        print("Vault is empty! Nothing to post.")
-        return
-
-    unposted = [p for p in vault_sorted if p["id"] not in posted_history]
+    unposted = [p for p in combined if p["id"] not in posted_history]
     if not unposted:
-        print("All carousels posted! Resetting rotation cycle.")
+        print("All items posted! Resetting rotation cycle.")
         posted_history = []
-        unposted = list(vault_sorted)
+        unposted = list(combined)
 
     posts_added = 0
     for idx, post in enumerate(unposted):
@@ -182,11 +183,12 @@ def run_autopilot():
             print(f"Reached --max={max_posts} cap.")
             break
 
-        print(f"-> [{idx+1}/{len(unposted)}] Queuing [{post['slug']}] | Viral Score: {post.get('viral_score','?')}")
-        print(f"   Title: {post['tiktok_title']}")
+        kind = "VIDEO (AUTO)" if post.get("video_url") else "CAROUSEL (NOTIFY)"
+        print(f"-> [{idx+1}/{len(unposted)}] [{kind}] {post['id']} | Score: {post.get('viral_score', '?')}")
+        print(f"   Title: {post.get('tiktok_title', '')}")
 
         try:
-            res = push_tiktok_carousel(post, post_index=posts_added)
+            res = push_tiktok_post(post, post_index=posts_added)
         except Exception as e:
             print(f"   Exception: {e}")
             continue
@@ -220,7 +222,7 @@ def run_autopilot():
             print(f"   Buffer returned {typename}: {msg or result}")
 
     save_json(HISTORY_PATH, posted_history)
-    print(f"\n=== Done! Queued {posts_added} viral carousels for @vicedale.gg ===")
+    print(f"\n=== Done! Queued {posts_added} items for @vicedale.gg ===")
 
 
 if __name__ == "__main__":
