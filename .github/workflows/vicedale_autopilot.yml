@@ -1,0 +1,38 @@
+name: Vice-Dale GTA 6 TikTok Autopilot
+
+on:
+  schedule:
+    # Runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC) to keep Buffer queue 10/10 full
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refill-tiktok-queue:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Refill @vicedale.gg Buffer TikTok Queue
+        env:
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+          BUFFER_TIKTOK_CHANNEL_ID: "6afd1afeece6dfde5f040b25"
+        run: |
+          python autopilot_refill.py
+
+      - name: Save Posted History
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add posted_history.json || true
+          git commit -m "chore: update posted history [skip ci]" || echo "No history changes"
+          git push || echo "Nothing to push"
