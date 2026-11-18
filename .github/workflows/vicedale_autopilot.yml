@@ -1,10 +1,19 @@
-name: Vice-Dale GTA 6 TikTok Autopilot
+name: Vice-Dale GTA 6 TikTok Autopilot v2.0
 
 on:
   schedule:
-    # Runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC) to keep Buffer queue 10/10 full
-    - cron: '0 */6 * * *'
+    # Refill every 3 hours around US peak slots (EST = UTC-5)
+    # 09:30 AM EST = 14:30 UTC | 12:30 PM = 17:30 UTC | 5:30 PM = 22:30 UTC | 9:30 PM = 02:30 UTC
+    - cron: '25 2 * * *'
+    - cron: '25 14 * * *'
+    - cron: '25 17 * * *'
+    - cron: '25 22 * * *'
   workflow_dispatch:
+    inputs:
+      max_posts:
+        description: 'Max posts to queue (default: unlimited until 10/10 full)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -12,27 +21,34 @@ permissions:
 jobs:
   refill-tiktok-queue:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Refill @vicedale.gg Buffer TikTok Queue
+      - name: Refill @vicedale.gg Buffer TikTok Queue (Viral-First + Anti-Shadowban)
         env:
           BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
           BUFFER_TIKTOK_CHANNEL_ID: "6afd1afeece6dfde5f040b25"
         run: |
-          python autopilot_refill.py
+          if [ -n "${{ github.event.inputs.max_posts }}" ]; then
+            python autopilot_refill.py --max=${{ github.event.inputs.max_posts }}
+          else
+            python autopilot_refill.py
+          fi
 
-      - name: Save Posted History
+      - name: Commit Updated Posted History
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add posted_history.json || true
-          git commit -m "chore: update posted history [skip ci]" || echo "No history changes"
+          git add posted_history.json VICEDALE_VAULT.json || true
+          git commit -m "chore: autopilot refill — posted history updated [skip ci]" || echo "No changes"
           git push || echo "Nothing to push"
